@@ -1,3 +1,5 @@
+from os.path import dirname, join
+
 import pandas as pd
 import numpy as np
 # For Pie Chart
@@ -7,7 +9,7 @@ from bokeh.palettes import Category20c
 from bokeh.plotting import figure
 from bokeh.transform import cumsum
 # For DataTable
-from bokeh.models import ColumnDataSource
+from bokeh.models import ColumnDataSource, RangeSlider, Button, CustomJS, NumberFormatter 
 from bokeh.models.widgets import DataTable, TableColumn, Select, Tabs, Panel
 # For Layouts
 from bokeh.layouts import column, row, widgetbox, layout, gridplot
@@ -41,7 +43,8 @@ def merc(Coords):
 
 
 # Creating a DataFrame to read the excel sheet data which is uncatogorized w.r.t. to regions.
-df = pd.read_excel('PCMC_WaterBill_Data.xlsx')
+# df = pd.read_excel('PCMC_WaterBill_Data1.xlsx')
+df = pd.read_csv('PCMC_WaterBill_Data.csv', sep='|')
 
 # Creating some list variables for sorting the data region-wise.
 marathi_local = []
@@ -101,7 +104,7 @@ def modify_doc(doc):
         map_data['coords_x'] = map_data['location'].apply(lambda x: merc(x)[0])
         map_data['coords_y'] = map_data['location'].apply(lambda x: merc(x)[1])
         print(map_data['due_amount'].max())
-        # Create x, where x the 'scores' column's values as floats
+        # Create x, where x the 'due_amount' column's values as floats
         x = map_data[['due_amount']].values.astype(float)
         # Create a minimum and maximum processor object
         min_max_scaler = preprocessing.MinMaxScaler()
@@ -184,6 +187,43 @@ def modify_doc(doc):
         billing_frequency_bar.legend.location = "top_center"
         
         ########################################################################################################
+        # For TableColumn of Top Due_Amount Holders
+        due_amount_source = ColumnDataSource(data=dict())
+
+        def due_amount_update():
+            descending_due_amount_data = data.sort_values(['due_amount'], ascending=[False]).drop_duplicates()
+            # descending_due_amount_data.index = np.arange(0, len(descending_due_amount_data) + 1)
+            # print(str(len(descending_due_amount_data)) + '  -  ' + str(len(due_amount_current)))
+            due_amount_current = descending_due_amount_data.iloc[due_amount_slider.value[0]:due_amount_slider.value[1], :]
+            due_amount_source.data = {
+                'Consumer ID':       due_amount_current.consumer_id,
+                'Consumer Name':     due_amount_current.consumer_name,
+                'Due Amount':        due_amount_current.due_amount,
+                'Billing Frequency': due_amount_current.billing_frequency,
+                'Address':           due_amount_current.address
+            }
+
+        due_amount_slider = RangeSlider(title="Top Due Amount", start=0, end=100, value=(0, 10), step=10, format="0,0")
+        due_amount_slider.on_change('value', lambda attr, old, new: due_amount_update())
+        loc_name.on_change('value', lambda attr, old, new: due_amount_update())
+
+        due_amount_button = Button(label="Download", button_type="success")
+        due_amount_button.js_on_click(CustomJS(args=dict(source=due_amount_source),
+                                    code=open(join(dirname(__file__), "download.js")).read()))
+
+        due_amount_columns = [
+            TableColumn(field="Consumer ID", title="Consumer ID"),
+            TableColumn(field="Consumer Name", title="Consumer Name"),
+            TableColumn(field="Due Amount", title="Due Amount", formatter=NumberFormatter(format="₹0,0.00")),
+            TableColumn(field="Billing Frequency", title="Billing Frequency"),
+            TableColumn(field="Address", title="Address")
+        ]
+
+        due_amount_data_table = DataTable(source=due_amount_source, columns=due_amount_columns)
+
+        due_amount_controls = column(due_amount_slider, due_amount_button)
+        
+        #######################################################################################################
         # Removing Axis and Gridlines
         connection_type_pie.axis.axis_label=None
         connection_type_pie.axis.visible=False
@@ -193,23 +233,25 @@ def modify_doc(doc):
         connection_size_pie.grid.grid_line_color = None
         
         # Returning all the updated charts
-        return connection_type_data_table, connection_type_pie, connection_size_data_table, connection_size_pie, map_chart, billing_frequency_bar
+        return connection_type_data_table, connection_type_pie, connection_size_data_table, connection_size_pie, map_chart, billing_frequency_bar, due_amount_data_table, due_amount_controls
     
     # Update the plot
     def update(attr, old, new):
-        connection_type_data_table, connection_type_pie, connection_size_data_table, connection_size_pie, map_chart, billing_frequency_bar = create_figure()
+        connection_type_data_table, connection_type_pie, connection_size_data_table, connection_size_pie, map_chart, billing_frequency_bar, due_amount_data_table, due_amount_controls = create_figure()
         
         # Creating the layouts for charts
         l1.children[1] = layout([[connection_type_data_table, connection_type_pie]], sizing_mode='scale_width')
         l2.children[1] = layout([[connection_size_data_table, connection_size_pie]], sizing_mode='scale_width')
         l3.children[1] = layout([[map_chart]], sizing_mode='scale_width')
         l4.children[1] = layout([[billing_frequency_bar]], sizing_mode='scale_width')
+        l5.children[1] = layout([[due_amount_controls], [due_amount_data_table]], sizing_mode='scale_width')
         
         # Creating the tabs for each layout.
         tab1 = Panel(child=l1, title="Connection Type")
         tab2 = Panel(child=l2, title="Connection Size")
         tab3 = Panel(child=l3, title="Map Chart")
         tab4 = Panel(child=l4, title="Billing Frequency")
+        tab5 = Panel(child=l5, title="Top Due Amount")
         
     # Controls
     available_loc_names = [i[0] for i in available_loc]
@@ -219,23 +261,26 @@ def modify_doc(doc):
     loc_name.on_change('value', update)
     
     controls = widgetbox([loc_name], width=200)
-    connection_type_data_table, connection_type_pie, connection_size_data_table, connection_size_pie, map_chart, billing_frequency_bar = create_figure()
+    connection_type_data_table, connection_type_pie, connection_size_data_table, connection_size_pie, map_chart, billing_frequency_bar, due_amount_data_table, due_amount_controls = create_figure()
     
     l1 = layout([[controls], [connection_type_data_table, connection_type_pie]], sizing_mode='scale_width')
     l2 = layout([[controls], [connection_size_data_table, connection_size_pie]], sizing_mode='scale_width')
     l3 = layout([[controls], [map_chart]], sizing_mode='scale_width')
     l4 = layout([[controls], [billing_frequency_bar]], sizing_mode='scale_width')
+    l5 = layout([[controls], [[due_amount_controls], [due_amount_data_table]]], sizing_mode='scale_width')
         
     tab1 = Panel(child=l1, title="connection_type")
     tab2 = Panel(child=l2, title="connection_size")
     tab3 = Panel(child=l3, title="map_chart")
     tab4 = Panel(child=l4, title="Billing Frequency")
+    tab5 = Panel(child=l5, title="Top Due Amount")
     
-    tabs = Tabs(tabs=[tab1, tab2, tab3, tab4])
+    tabs = Tabs(tabs=[tab1, tab2, tab3, tab4, tab5])
     doc.add_root(tabs)
 
 
 apps = {'/': Application(FunctionHandler(modify_doc))}
-server = Server(apps, port=5006, allow_websocket_origin=['192.168.1.19:5006'])
+server = Server(apps, port=80, allow_websocket_origin=['*'])
+# server = Server(apps, port=5006)
 server.start()
 server.io_loop.start()
